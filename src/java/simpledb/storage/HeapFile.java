@@ -1,15 +1,12 @@
 package simpledb.storage;
 
-import simpledb.common.Database;
 import simpledb.common.DbException;
-import simpledb.common.Debug;
-import simpledb.common.Permissions;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
-import java.io.*;
-import java.util.ArrayList;
-import java.util.Iterator;
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.util.List;
 
 /**
@@ -24,6 +21,9 @@ import java.util.List;
  */
 public class HeapFile implements DbFile {
 
+    private final File file;
+    private final TupleDesc tupleDesc;
+
     /**
      * Constructs a heap file backed by the specified file.
      *
@@ -31,7 +31,8 @@ public class HeapFile implements DbFile {
      *          file.
      */
     public HeapFile(File f, TupleDesc td) {
-        // TODO: some code goes here
+        this.file = f;
+        this.tupleDesc = td;
     }
 
     /**
@@ -40,8 +41,7 @@ public class HeapFile implements DbFile {
      * @return the File backing this HeapFile on disk.
      */
     public File getFile() {
-        // TODO: some code goes here
-        return null;
+        return this.file;
     }
 
     /**
@@ -54,8 +54,7 @@ public class HeapFile implements DbFile {
      * @return an ID uniquely identifying this HeapFile.
      */
     public int getId() {
-        // TODO: some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return this.file.getAbsoluteFile().hashCode();
     }
 
     /**
@@ -64,14 +63,21 @@ public class HeapFile implements DbFile {
      * @return TupleDesc of this DbFile.
      */
     public TupleDesc getTupleDesc() {
-        // TODO: some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return this.tupleDesc;
     }
 
     // see DbFile.java for javadocs
     public Page readPage(PageId pid) {
-        // TODO: some code goes here
-        return null;
+        int pageNumber = pid.getPageNumber();
+        try (RandomAccessFile randomAccessFile = new RandomAccessFile(this.file, "r")) {
+            int pageSize = BufferPool.getPageSize();
+            byte[] bytes = new byte[pageSize];
+            randomAccessFile.seek(((long) pageNumber) * pageSize);
+            randomAccessFile.read(bytes);
+            return new HeapPage((HeapPageId) pid, bytes);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("unable to read file.");
+        }
     }
 
     // see DbFile.java for javadocs
@@ -84,8 +90,9 @@ public class HeapFile implements DbFile {
      * Returns the number of pages in this HeapFile.
      */
     public int numPages() {
-        // TODO: some code goes here
-        return 0;
+        long length = this.file.length();
+        int pageSize = BufferPool.getPageSize();
+        return (int) Math.ceil((double) length / pageSize);
     }
 
     // see DbFile.java for javadocs
@@ -106,8 +113,7 @@ public class HeapFile implements DbFile {
 
     // see DbFile.java for javadocs
     public DbFileIterator iterator(TransactionId tid) {
-        // TODO: some code goes here
-        return null;
+        return new HeapFileIterator(tid, this);
     }
 
 }

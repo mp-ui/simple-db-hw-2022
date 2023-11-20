@@ -8,7 +8,13 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -22,12 +28,15 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class Catalog {
 
+    private final Map<String, DbFile> dbName2FileMap = new ConcurrentHashMap<>();
+    private final Map<String, String> dbName2PrimaryKeyMap = new ConcurrentHashMap<>();
+    private final Map<Integer, String> tableId2DbNameMap = new ConcurrentHashMap<>();
+
     /**
      * Constructor.
      * Creates a new, empty catalog.
      */
     public Catalog() {
-        // TODO: some code goes here
     }
 
     /**
@@ -41,7 +50,17 @@ public class Catalog {
      * @param pkeyField the name of the primary key field
      */
     public void addTable(DbFile file, String name, String pkeyField) {
-        // TODO: some code goes here
+        if (Objects.isNull(name) || Objects.isNull(file)) {
+            throw new IllegalArgumentException("name or file is null");
+        }
+        // 判断是否已存在相同名称的表，若存在则直接覆盖
+        if (this.dbName2FileMap.containsKey(name)) {
+            this.tableId2DbNameMap.remove(this.dbName2FileMap.get(name).getId());
+        }
+
+        this.dbName2FileMap.put(name, file);
+        this.dbName2PrimaryKeyMap.put(name, pkeyField);
+        this.tableId2DbNameMap.put(file.getId(), name);
     }
 
     public void addTable(DbFile file, String name) {
@@ -66,8 +85,14 @@ public class Catalog {
      * @throws NoSuchElementException if the table doesn't exist
      */
     public int getTableId(String name) throws NoSuchElementException {
-        // TODO: some code goes here
-        return 0;
+        if (Objects.isNull(name)) {
+            throw new NoSuchElementException();
+        }
+        DbFile dbFile = this.dbName2FileMap.get(name);
+        if (Objects.isNull(dbFile)) {
+            throw new NoSuchElementException();
+        }
+        return dbFile.getId();
     }
 
     /**
@@ -78,8 +103,11 @@ public class Catalog {
      * @throws NoSuchElementException if the table doesn't exist
      */
     public TupleDesc getTupleDesc(int tableid) throws NoSuchElementException {
-        // TODO: some code goes here
-        return null;
+        DbFile dbFile = this.getDatabaseFile(tableid);
+        if (Objects.isNull(dbFile)) {
+            throw new NoSuchElementException();
+        }
+        return dbFile.getTupleDesc();
     }
 
     /**
@@ -90,30 +118,36 @@ public class Catalog {
      *                function passed to addTable
      */
     public DbFile getDatabaseFile(int tableid) throws NoSuchElementException {
-        // TODO: some code goes here
-        return null;
+        String name = this.getTableName(tableid);
+        if (Objects.isNull(name)) {
+            throw new NoSuchElementException();
+        }
+        return dbName2FileMap.get(name);
     }
 
     public String getPrimaryKey(int tableid) {
-        // TODO: some code goes here
-        return null;
+        String name = this.getTableName(tableid);
+        if (Objects.isNull(name)) {
+            throw new NoSuchElementException();
+        }
+        return dbName2PrimaryKeyMap.get(name);
     }
 
     public Iterator<Integer> tableIdIterator() {
-        // TODO: some code goes here
-        return null;
+        return this.tableId2DbNameMap.keySet().iterator();
     }
 
     public String getTableName(int id) {
-        // TODO: some code goes here
-        return null;
+        return this.tableId2DbNameMap.get(id);
     }
 
     /**
      * Delete all tables from the catalog
      */
     public void clear() {
-        // TODO: some code goes here
+        this.tableId2DbNameMap.clear();
+        this.dbName2FileMap.clear();
+        this.dbName2PrimaryKeyMap.clear();
     }
 
     /**

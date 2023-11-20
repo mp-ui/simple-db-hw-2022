@@ -19,13 +19,13 @@ import java.util.NoSuchElementException;
  */
 public class HeapPage implements Page {
 
-    final HeapPageId pid;
-    final TupleDesc td;
-    final byte[] header;
-    final Tuple[] tuples;
-    final int numSlots;
+    private final HeapPageId pid;
+    private final TupleDesc td;
+    private final byte[] header;
+    private final Tuple[] tuples;
+    private final int numSlots;
 
-    byte[] oldData;
+    private byte[] oldData;
     private final Byte oldDataLock = (byte) 0;
 
     /**
@@ -75,9 +75,10 @@ public class HeapPage implements Page {
      * @return the number of tuples on this page
      */
     private int getNumTuples() {
-        // TODO: some code goes here
-        return 0;
-
+        int pageSize = BufferPool.getPageSize();
+        int tdSize = td.getSize();
+        // 一个页面一共pageSize字节，也就是pageSize*8位，每个tuple需要tdSize*8+1位（其中+1是header位）
+        return (int) Math.floor((pageSize * 8.0) / (tdSize * 8 + 1));
     }
 
     /**
@@ -86,10 +87,9 @@ public class HeapPage implements Page {
      * @return the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      */
     private int getHeaderSize() {
-
-        // TODO: some code goes here
-        return 0;
-
+        // 一个tuple需要tdSize*8+1位，所以需要的header位数为tuple数/8，如果不能整除则需要+1
+        int num = getNumTuples();
+        return num % 8 == 0 ? num / 8 : num / 8 + 1;
     }
 
     /**
@@ -121,8 +121,7 @@ public class HeapPage implements Page {
      * @return the PageId associated with this page.
      */
     public HeapPageId getId() {
-        // TODO: some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return pid;
     }
 
     /**
@@ -293,16 +292,22 @@ public class HeapPage implements Page {
      * Returns the number of unused (i.e., empty) slots on this page.
      */
     public int getNumUnusedSlots() {
-        // TODO: some code goes here
-        return 0;
+        int res = 0;
+        for (int i = 0; i < this.numSlots; i++) {
+            if (!this.isSlotUsed(i)) {
+                res++;
+            }
+        }
+        return res;
     }
 
     /**
      * Returns true if associated slot on this page is filled.
      */
     public boolean isSlotUsed(int i) {
-        // TODO: some code goes here
-        return false;
+        int j = i / 8;
+        int k = i % 8;
+        return (this.header[j] & (1 << k)) != 0;
     }
 
     /**
@@ -318,8 +323,26 @@ public class HeapPage implements Page {
      *         (note that this iterator shouldn't return tuples in empty slots!)
      */
     public Iterator<Tuple> iterator() {
-        // TODO: some code goes here
-        return null;
+        return new Iterator<>() {
+            int i = 0;
+
+            @Override
+            public boolean hasNext() {
+                while (i < numSlots && !isSlotUsed(i)) {
+                    i++;
+                }
+                return i < numSlots;
+            }
+
+            @Override
+            public Tuple next() {
+                if (hasNext()) {
+                    return tuples[i++];
+                } else {
+                    throw new NoSuchElementException();
+                }
+            }
+        };
     }
 
 }

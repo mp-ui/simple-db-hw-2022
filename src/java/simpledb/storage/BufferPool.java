@@ -1,16 +1,19 @@
 package simpledb.storage;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import simpledb.common.Database;
 import simpledb.common.DbException;
-import simpledb.common.DeadlockException;
 import simpledb.common.Permissions;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * BufferPool manages the reading and writing of pages into memory from
@@ -24,10 +27,20 @@ import java.util.concurrent.ConcurrentMap;
  * @Threadsafe, all fields are final
  */
 public class BufferPool {
+    private static final Logger LOGGER = LoggerFactory.getLogger(BufferPool.class);
+
     /**
      * Bytes per page, including header.
      */
     private static final int DEFAULT_PAGE_SIZE = 4096;
+    /**
+     * 冷热链表中冷数据的比例
+     */
+    private static final double DEFAULT_OLD_DATA_RATE = 0.2;
+    /**
+     * 冷数据在冷链表中的保存时间（毫秒），默认1秒
+     */
+    private static final Integer DEFAULT_OLD_BLOCK_TIMES = 1000;
 
     private static int pageSize = DEFAULT_PAGE_SIZE;
 
@@ -38,13 +51,21 @@ public class BufferPool {
      */
     public static final int DEFAULT_PAGES = 50;
 
+    private final int numYoungSize;
+    private final int numOldSize;
+
+    private final Map<PageId, Date> lastUsedTimeMap = new HashMap<>();
+    private final LinkedHashMap<PageId, Page> youngMap = new LinkedHashMap<>();
+    private final LinkedHashMap<PageId, Page> oldMap = new LinkedHashMap<>();
+
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
      * @param numPages maximum number of pages in this buffer pool.
      */
     public BufferPool(int numPages) {
-        // TODO: some code goes here
+        this.numOldSize = (int) (numPages * DEFAULT_OLD_DATA_RATE);
+        this.numYoungSize = numPages - numOldSize;
     }
 
     public static int getPageSize() {
@@ -78,8 +99,67 @@ public class BufferPool {
      */
     public Page getPage(TransactionId tid, PageId pid, Permissions perm)
             throws TransactionAbortedException, DbException {
-        // TODO: some code goes here
-        return null;
+        // 简单LRU算法实现
+        Date now = new Date();
+        DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
+        LOGGER.info("Prepare to get page from youngMap. tid={}, tableId={}, pageNo={}, perm={}",
+                tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
+        Page page = youngMap.get(pid);
+        if (Objects.isNull(page)) {
+            LOGGER.info("Page not found in young map, attempt to get it in old map. tid={}, tableId={}, pageNo={}, " +
+                    "perm={}", tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
+            page = oldMap.get(pid);
+            if (Objects.isNull(page)) {
+                LOGGER.info("Page not found in old map, attempt to read it from disk. tid={}, tableId={}, " +
+                        "pageNo={}, perm={}", tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
+                page = dbFile.readPage(pid);
+                LOGGER.info("Read page from disk. tid={}, tableId={}, pageNo={}, perm={}",
+                        tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
+                // 尽量使用缓存
+                if (oldMap.size() < numOldSize) {
+                    this.putIntoMap(oldMap, page, numYoungSize);
+                } else if (youngMap.size() < numYoungSize) {
+                    this.putIntoMap(youngMap, page, numYoungSize);
+                } else {
+                    this.putIntoMap(oldMap, page, numYoungSize);
+                }
+            } else {
+                LOGGER.info("Got page from oldMap. tid={}, tableId={}, pageNo={}, perm={}",
+                        tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
+                this.removeFromMap(oldMap, pid);
+                Date lastUsedTime = lastUsedTimeMap.getOrDefault(pid, now);
+                if (now.getTime() - lastUsedTime.getTime() > DEFAULT_OLD_BLOCK_TIMES) {
+                    this.putIntoMap(youngMap, page, numYoungSize);
+                } else {
+                    this.putIntoMap(oldMap, page, numOldSize);
+                }
+            }
+        } else {
+            LOGGER.info("Got page from youngMap. tid={}, tableId={}, pageNo={}, perm={}",
+                    tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
+            this.removeFromMap(youngMap, pid);
+            this.putIntoMap(youngMap, page, numYoungSize);
+        }
+        // 更新最后使用时间
+        lastUsedTimeMap.put(pid, now);
+        return page;
+    }
+
+    /**
+     * 从map中移除page
+     */
+    private void removeFromMap(LinkedHashMap<PageId, Page> map, PageId pageId) {
+        map.remove(pageId);
+    }
+
+    /**
+     * 将page放入map中，如果超过最大长度，需要移除最久未被使用的page
+     */
+    private void putIntoMap(LinkedHashMap<PageId, Page> map, Page page, int limit) {
+        map.put(page.getId(), page);
+        if (map.size() > limit) {
+            map.remove(map.keySet().iterator().next());
+        }
     }
 
     /**

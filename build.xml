@@ -23,8 +23,8 @@
         <pathelement location="${lib}/jline-0.9.94.jar"/>
         <pathelement location="${lib}/mina-core-2.0.4.jar"/>
         <pathelement location="${lib}/mina-filter-compression-2.0.4.jar"/>
-        <pathelement location="${lib}/slf4j-api-1.6.1.jar"/>
-        <pathelement location="${lib}/slf4j-log4j12-1.6.1.jar"/>
+        <pathelement location="${lib}/slf4j-api-2.0.9.jar"/>
+        <pathelement location="${lib}/slf4j-reload4j-2.0.9.jar"/>
         <pathelement location="${lib}/log4j-1.2.17.jar"/>
         <pathelement location="${lib}/jzlib-1.0.7.jar"/>
     </path>
@@ -144,15 +144,15 @@
             </echo>
         </then>
     </if>
-    <if> <available file="${lib}/slf4j-api-1.6.1.jar" /> <then>
+    <if> <available file="${lib}/slf4j-api-2.0.9.jar" /> <then>
             <echo file=".classpath" append="true">
-                &lt;classpathentry kind=&quot;lib&quot; path=&quot;lib/slf4j-api-1.6.1.jar&quot;/&gt;
+                &lt;classpathentry kind=&quot;lib&quot; path=&quot;lib/slf4j-api-2.0.9.jar&quot;/&gt;
             </echo>
         </then>
     </if>
-    <if> <available file="${lib}/slf4j-log4j12-1.6.1.jar" /> <then>
+    <if> <available file="${lib}/slf4j-reload4j-2.0.9.jar" /> <then>
             <echo file=".classpath" append="true">
-                &lt;classpathentry kind=&quot;lib&quot; path=&quot;lib/slf4j-log4j12-1.6.1.jar&quot;/&gt;
+                &lt;classpathentry kind=&quot;lib&quot; path=&quot;lib/slf4j-reload4j-2.0.9.jar&quot;/&gt;
             </echo>
         </then>
     </if>
