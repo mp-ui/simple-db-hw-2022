@@ -119,9 +119,18 @@ public class BufferPool {
                 if (oldMap.size() < numOldSize) {
                     this.putIntoMap(oldMap, page, numYoungSize);
                 } else if (youngMap.size() < numYoungSize) {
-                    this.putIntoMap(youngMap, page, numYoungSize);
+                    // young区有位置，但old区满，则将old区的一个页面移动到young区，然后将新页面放入old区
+                    if (!oldMap.isEmpty()) {
+                        PageId tmpPageId = this.oldMap.keySet().stream().findFirst().get();
+                        Page tmpPage = this.oldMap.get(tmpPageId);
+                        this.removeFromMap(oldMap, tmpPageId);
+                        this.putIntoMap(youngMap, tmpPage, numYoungSize);
+                        this.putIntoMap(oldMap, page, numOldSize);
+                    } else {
+                        this.putIntoMap(youngMap, page, numYoungSize);
+                    }
                 } else {
-                    this.putIntoMap(oldMap, page, numYoungSize);
+                    this.putIntoMap(youngMap, page, numYoungSize);
                 }
             } else {
                 LOGGER.info("Got page from oldMap. tid={}, tableId={}, pageNo={}, perm={}",
