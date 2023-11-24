@@ -130,7 +130,11 @@ public class BufferPool {
                         this.putIntoMap(youngMap, page, numYoungSize);
                     }
                 } else {
-                    this.putIntoMap(youngMap, page, numYoungSize);
+                    if (numOldSize > 0) {
+                        this.putIntoMap(oldMap, page, numOldSize);
+                    } else {
+                        this.putIntoMap(youngMap, page, numYoungSize);
+                    }
                 }
             } else {
                 LOGGER.info("Got page from oldMap. tid={}, tableId={}, pageNo={}, perm={}",
