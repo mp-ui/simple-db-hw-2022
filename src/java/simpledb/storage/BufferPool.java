@@ -137,7 +137,8 @@ public class BufferPool {
                         tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
                 this.removeFromMap(oldMap, pid);
                 Date lastUsedTime = lastUsedTimeMap.getOrDefault(pid, now);
-                if (now.getTime() - lastUsedTime.getTime() > DEFAULT_OLD_BLOCK_TIMES) {
+                if (now.getTime() - lastUsedTime.getTime() > DEFAULT_OLD_BLOCK_TIMES &&
+                        youngMap.size() < numYoungSize) {
                     this.putIntoMap(youngMap, page, numYoungSize);
                 } else {
                     this.putIntoMap(oldMap, page, numOldSize);
@@ -168,6 +169,7 @@ public class BufferPool {
         map.put(page.getId(), page);
         if (map.size() > limit) {
             map.remove(map.keySet().iterator().next());
+            lastUsedTimeMap.remove(page.getId());
         }
     }
 
