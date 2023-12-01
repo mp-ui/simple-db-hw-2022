@@ -5,14 +5,19 @@ import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
 import simpledb.transaction.TransactionAbortedException;
 
+import java.io.Serial;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 
 /**
  * Filter is an operator that implements a relational select.
  */
 public class Filter extends Operator {
+    @Serial
+    private static final long serialVersionUID = -394502039912740208L;
 
-    private static final long serialVersionUID = 1L;
+    private final Predicate predicate;
+    private OpIterator child;
 
     /**
      * Constructor accepts a predicate to apply and a child operator to read
@@ -22,30 +27,30 @@ public class Filter extends Operator {
      * @param child The child operator
      */
     public Filter(Predicate p, OpIterator child) {
-        // TODO: some code goes here
+        this.predicate = p;
+        this.child = child;
     }
 
     public Predicate getPredicate() {
-        // TODO: some code goes here
-        return null;
+        return this.predicate;
     }
 
     public TupleDesc getTupleDesc() {
-        // TODO: some code goes here
-        return null;
+        return this.child.getTupleDesc();
     }
 
-    public void open() throws DbException, NoSuchElementException,
-            TransactionAbortedException {
-        // TODO: some code goes here
+    public void open() throws DbException, NoSuchElementException, TransactionAbortedException {
+        super.open();
+        this.child.open();
     }
 
     public void close() {
-        // TODO: some code goes here
+        super.close();
+        this.child.close();
     }
 
     public void rewind() throws DbException, TransactionAbortedException {
-        // TODO: some code goes here
+        this.child.rewind();
     }
 
     /**
@@ -53,25 +58,30 @@ public class Filter extends Operator {
      * child operator, applying the predicate to them and returning those that
      * pass the predicate (i.e. for which the Predicate.filter() returns true.)
      *
-     * @return The next tuple that passes the filter, or null if there are no
-     *         more tuples
+     * @return The next tuple that passes the filter, or null if there are no more tuples
      * @see Predicate#filter
      */
-    protected Tuple fetchNext() throws NoSuchElementException,
-            TransactionAbortedException, DbException {
-        // TODO: some code goes here
-        return null;
+    protected Tuple fetchNext() throws NoSuchElementException, TransactionAbortedException, DbException {
+        // 需要筛选符合条件的
+        Tuple next = null;
+        while (this.child.hasNext()) {
+            next = this.child.next();
+            if (Objects.isNull(next) || this.predicate.filter(next)) {
+                break;
+            }
+            next = null;
+        }
+        return next;
     }
 
     @Override
     public OpIterator[] getChildren() {
-        // TODO: some code goes here
-        return null;
+        return new OpIterator[]{this.child};
     }
 
     @Override
     public void setChildren(OpIterator[] children) {
-        // TODO: some code goes here
+        this.child = children[0];
     }
 
 }
