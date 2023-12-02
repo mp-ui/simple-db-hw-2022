@@ -5,13 +5,14 @@ import simpledb.execution.Predicate;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.Serial;
 
 /**
  * Instance of Field that stores a single String of a fixed length.
  */
 public class StringField implements Field {
-
-    private static final long serialVersionUID = 1L;
+    @Serial
+    private static final long serialVersionUID = -3285049264910793411L;
 
     private final String value;
     private final int maxSize;
@@ -71,7 +72,6 @@ public class StringField implements Field {
      * Compare the specified field to the value of this Field. Return semantics
      * are as specified by Field.compare
      *
-     * @throws IllegalCastException if val is not a StringField
      * @see Field#compare
      */
     public boolean compare(Predicate.Op op, Field val) {

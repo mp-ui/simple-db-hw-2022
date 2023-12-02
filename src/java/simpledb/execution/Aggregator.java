@@ -1,5 +1,8 @@
 package simpledb.execution;
 
+import simpledb.common.Type;
+import simpledb.storage.Field;
+import simpledb.storage.IntField;
 import simpledb.storage.Tuple;
 import simpledb.storage.TupleIterator;
 
@@ -11,6 +14,7 @@ import java.io.Serializable;
  */
 public interface Aggregator extends Serializable {
     int NO_GROUPING = -1;
+    Field NO_GROUPING_FIELD = new IntField(0);
 
     /**
      * SUM_COUNT and SC_AVG will
@@ -67,6 +71,14 @@ public interface Aggregator extends Serializable {
                 return "sc_avg";
             throw new IllegalStateException("impossible to reach here");
         }
+
+        /**
+         * 获取该聚合查询对应的列类型
+         */
+        public Type getType() {
+            // 目前支持的所有聚合操作中，输出的全都是整形
+            return Type.INT_TYPE;
+        }
     }
 
     /**
@@ -81,6 +93,10 @@ public interface Aggregator extends Serializable {
     /**
      * Create a OpIterator over group aggregate results.
      *
+     * @return a OpIterator whose tuples are the pair (groupVal, aggregateVal)
+     * if using group, or a single (aggregateVal) if no grouping. The
+     * aggregateVal is determined by the type of aggregate specified in
+     * the constructor.
      * @see TupleIterator for a possible helper
      */
     OpIterator iterator();

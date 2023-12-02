@@ -1,52 +1,45 @@
 package simpledb.execution;
 
 import simpledb.common.Type;
-import simpledb.storage.Tuple;
+import simpledb.storage.Field;
+import simpledb.storage.IntField;
+
+import java.io.Serial;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Knows how to compute some aggregate over a set of IntFields.
  */
-public class IntegerAggregator implements Aggregator {
+public class IntegerAggregator extends AbstractAggregator {
+    @Serial
+    private static final long serialVersionUID = -6053561637443413959L;
 
-    private static final long serialVersionUID = 1L;
+    private final Map<Field, Integer> countMap;
+    private final Map<Field, Integer> minMap;
+    private final Map<Field, Integer> maxMap;
+    private final Map<Field, Integer> sumMap;
 
-    /**
-     * Aggregate constructor
-     *
-     * @param gbfield     the 0-based index of the group-by field in the tuple, or
-     *                    NO_GROUPING if there is no grouping
-     * @param gbfieldtype the type of the group by field (e.g., Type.INT_TYPE), or null
-     *                    if there is no grouping
-     * @param afield      the 0-based index of the aggregate field in the tuple
-     * @param what        the aggregation operator
-     */
-
-    public IntegerAggregator(int gbfield, Type gbfieldtype, int afield, Op what) {
-        // TODO: some code goes here
+    public IntegerAggregator(int groupField, Type groupFieldType, int aggregateField, Op aggregateOperation) {
+        super(groupField, groupFieldType, aggregateField, aggregateOperation);
+        this.countMap = new HashMap<>();
+        this.minMap = new HashMap<>();
+        this.maxMap = new HashMap<>();
+        this.sumMap = new HashMap<>();
     }
 
-    /**
-     * Merge a new tuple into the aggregate, grouping as indicated in the
-     * constructor
-     *
-     * @param tup the Tuple containing an aggregate field and a group-by field
-     */
-    public void mergeTupleIntoGroup(Tuple tup) {
-        // TODO: some code goes here
+    @Override
+    protected void calculate(Field groupField, Field aggregateField) {
+        int aggregateValue = ((IntField) aggregateField).getValue();
+        // 统计个数、最小值、最大值以及总和
+        countMap.put(groupField, countMap.getOrDefault(groupField, 0) + 1);
+        minMap.put(groupField, Math.min(minMap.getOrDefault(groupField, Integer.MAX_VALUE), aggregateValue));
+        maxMap.put(groupField, Math.max(maxMap.getOrDefault(groupField, Integer.MIN_VALUE), aggregateValue));
+        sumMap.put(groupField, sumMap.getOrDefault(groupField, 0) + aggregateValue);
     }
 
-    /**
-     * Create a OpIterator over group aggregate results.
-     *
-     * @return a OpIterator whose tuples are the pair (groupVal, aggregateVal)
-     *         if using group, or a single (aggregateVal) if no grouping. The
-     *         aggregateVal is determined by the type of aggregate specified in
-     *         the constructor.
-     */
     public OpIterator iterator() {
-        // TODO: some code goes here
-        throw new
-        UnsupportedOperationException("please implement me for lab2");
+        return new IntegerAggregatorIterator(this, this.countMap, this.minMap, this.maxMap, this.sumMap);
     }
 
 }
