@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -115,27 +116,8 @@ public class BufferPool {
                 page = dbFile.readPage(pid);
                 LOGGER.info("Read page from disk. tid={}, tableId={}, pageNo={}, perm={}",
                         tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
-                // 尽量使用缓存
-                if (oldMap.size() < numOldSize) {
-                    this.putIntoMap(oldMap, page, numYoungSize);
-                } else if (youngMap.size() < numYoungSize) {
-                    // young区有位置，但old区满，则将old区的一个页面移动到young区，然后将新页面放入old区
-                    if (!oldMap.isEmpty()) {
-                        PageId tmpPageId = this.oldMap.keySet().stream().findFirst().get();
-                        Page tmpPage = this.oldMap.get(tmpPageId);
-                        this.removeFromMap(oldMap, tmpPageId);
-                        this.putIntoMap(youngMap, tmpPage, numYoungSize);
-                        this.putIntoMap(oldMap, page, numOldSize);
-                    } else {
-                        this.putIntoMap(youngMap, page, numYoungSize);
-                    }
-                } else {
-                    if (numOldSize > 0) {
-                        this.putIntoMap(oldMap, page, numOldSize);
-                    } else {
-                        this.putIntoMap(youngMap, page, numYoungSize);
-                    }
-                }
+                // 存入BufferPool
+                this.addPage(page);
             } else {
                 LOGGER.info("Got page from oldMap. tid={}, tableId={}, pageNo={}, perm={}",
                         tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
@@ -162,18 +144,61 @@ public class BufferPool {
     /**
      * 从map中移除page
      */
-    private void removeFromMap(LinkedHashMap<PageId, Page> map, PageId pageId) {
+    private synchronized void removeFromMap(LinkedHashMap<PageId, Page> map, PageId pageId) {
         map.remove(pageId);
     }
 
     /**
      * 将page放入map中，如果超过最大长度，需要移除最久未被使用的page
      */
-    private void putIntoMap(LinkedHashMap<PageId, Page> map, Page page, int limit) {
+    private synchronized void putIntoMap(LinkedHashMap<PageId, Page> map, Page page, int limit) {
         map.put(page.getId(), page);
         if (map.size() > limit) {
             map.remove(map.keySet().iterator().next());
             lastUsedTimeMap.remove(page.getId());
+        }
+    }
+
+    private synchronized void addPage(Page page) throws DbException {
+        // 校验该页面是否已在BufferPool中存在
+        PageId pageId = page.getId();
+        if (youngMap.containsKey(pageId) || oldMap.containsKey(pageId)) {
+            return;
+        }
+        // 尽量使用缓存
+        if (oldMap.size() < numOldSize) {
+            this.putIntoMap(oldMap, page, numYoungSize);
+        } else if (youngMap.size() < numYoungSize) {
+            // young区有位置，但old区满，则将old区的一个页面移动到young区，然后将新页面放入old区
+            if (!oldMap.isEmpty()) {
+                PageId tmpPageId = this.oldMap.keySet().stream().findFirst().get();
+                Page tmpPage = this.oldMap.get(tmpPageId);
+                this.removeFromMap(this.oldMap, tmpPageId);
+                this.putIntoMap(youngMap, tmpPage, numYoungSize);
+                this.putIntoMap(oldMap, page, numOldSize);
+            } else {
+                this.putIntoMap(youngMap, page, numYoungSize);
+            }
+        } else {
+            // 均满，则驱逐一个页面
+            this.evictPage();
+            // 重新添加
+            this.addPage(page);
+        }
+    }
+
+    /**
+     * Discards a page from the buffer pool.
+     * Flushes the page to disk to ensure dirty pages are updated on disk.
+     * 当BufferPool满时，用于驱逐一个页面
+     */
+    private synchronized void evictPage() throws DbException {
+        if (!oldMap.isEmpty()) {
+            PageId pageId = oldMap.keySet().stream().findFirst().get();
+            this.removePage(pageId);
+        } else if (!youngMap.isEmpty()) {
+            PageId pageId = youngMap.keySet().stream().findFirst().get();
+            this.removePage(pageId);
         }
     }
 
@@ -239,8 +264,12 @@ public class BufferPool {
      */
     public void insertTuple(TransactionId tid, int tableId, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
-        // TODO: some code goes here
-        // not necessary for lab1
+        DbFile dbFile = Database.getCatalog().getDatabaseFile(tableId);
+        List<Page> pages = dbFile.insertTuple(tid, t);
+        for (Page page : pages) {
+            page.markDirty(true, tid);
+            this.addPage(page);
+        }
     }
 
     /**
@@ -258,8 +287,13 @@ public class BufferPool {
      */
     public void deleteTuple(TransactionId tid, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
-        // TODO: some code goes here
-        // not necessary for lab1
+        RecordId recordId = t.getRecordId();
+        DbFile dbFile = Database.getCatalog().getDatabaseFile(recordId.getPageId().getTableId());
+        List<Page> pages = dbFile.deleteTuple(tid, t);
+        for (Page page : pages) {
+            page.markDirty(true, tid);
+            this.addPage(page);
+        }
     }
 
     /**
@@ -268,9 +302,11 @@ public class BufferPool {
      * break simpledb if running in NO STEAL mode.
      */
     public synchronized void flushAllPages() throws IOException {
-        // TODO: some code goes here
-        // not necessary for lab1
-
+        for (Page page : oldMap.values()) {
+            if (Objects.nonNull(page.isDirty())) {
+                this.flushPage(page.getId());
+            }
+        }
     }
 
     /**
@@ -283,8 +319,13 @@ public class BufferPool {
      * are removed from the cache so they can be reused safely
      */
     public synchronized void removePage(PageId pid) {
-        // TODO: some code goes here
-        // not necessary for lab1
+        try {
+            this.flushPage(pid);
+            this.youngMap.remove(pid);
+            this.oldMap.remove(pid);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -293,8 +334,15 @@ public class BufferPool {
      * @param pid an ID indicating the page to flush
      */
     private synchronized void flushPage(PageId pid) throws IOException {
-        // TODO: some code goes here
-        // not necessary for lab1
+        Page page = oldMap.get(pid);
+        if (Objects.isNull(page)) {
+            youngMap.get(pid);
+        }
+        if (Objects.nonNull(page)) {
+            DbFile dbFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
+            dbFile.writePage(page);
+            page.markDirty(false, null);
+        }
     }
 
     /**
@@ -303,15 +351,6 @@ public class BufferPool {
     public synchronized void flushPages(TransactionId tid) throws IOException {
         // TODO: some code goes here
         // not necessary for lab1|lab2
-    }
-
-    /**
-     * Discards a page from the buffer pool.
-     * Flushes the page to disk to ensure dirty pages are updated on disk.
-     */
-    private synchronized void evictPage() throws DbException {
-        // TODO: some code goes here
-        // not necessary for lab1
     }
 
 }

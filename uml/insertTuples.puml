@@ -1,0 +1,36 @@
+@startuml
+actor User as u
+participant BufferPool as f1
+participant HeapFile as f2
+participant HeapPage as f3
+
+skinparam responseMessageBelowArrow true
+autonumber
+
+u -> f1: 新增一行数据，调用BufferPool.insertTuple()\n传入TransactionID、TableId、Tuple
+
+f1 -> f1: 根据TableId找到对应的HeapFile
+f1 -> f2: 通过HeapFile.insertTuple()新增数据\n传入TransactionID和Tuple
+
+f2 -> f2: 找到一个有空位置的页面
+note left
+    需要通过BufferPool.getPage()获取页面，
+    因为如果一个页面如果被修改过但未刷入磁盘，
+    直接在磁盘读取页面，得到的不是最新页面
+end note
+
+f2 -> f3: 调用HeapPage.insertTuple()新增数据，传入Tuple
+f2 <-- f3: 新增成功
+
+f1 <-- f2: 返回修改的页面
+
+loop 修改到的页面
+    f1 -> f1: markDirty()标记为脏页
+    alt 如果BufferPool不存在该页面
+        f1 -> f1: 将该页面存进BufferPool
+    end
+end
+
+u <-- f1: 插入成功
+
+@enduml
