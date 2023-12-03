@@ -4,6 +4,7 @@ import simpledb.common.Type;
 import simpledb.common.Utility;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 
@@ -150,12 +151,15 @@ public class HeapFileEncoder {
                     }
                 } else if (typeAr[fieldNo] == Type.STRING_TYPE) {
                     s = s.trim();
-                    int overflow = Type.STRING_LEN - s.length();
+                    byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
+                    int overflow = Type.STRING_LEN - bytes.length;
                     if (overflow < 0) {
-                        s = s.substring(0, Type.STRING_LEN);
+                        // s = s.substring(0, Type.STRING_LEN);
+                        bytes = Arrays.copyOf(bytes, Type.STRING_LEN);
                     }
-                    pageStream.writeInt(s.length());
-                    pageStream.writeBytes(s);
+                    pageStream.writeInt(bytes.length);
+                    // pageStream.writeBytes(s);
+                    pageStream.write(bytes);
                     while (overflow-- > 0)
                         pageStream.write((byte) 0);
                 }

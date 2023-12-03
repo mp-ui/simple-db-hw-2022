@@ -1,0 +1,2 @@
+some_data_file1 (id int, name string, age int)
+some_data_file2 (id int, name string, money int)

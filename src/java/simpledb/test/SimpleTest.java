@@ -1,4 +1,4 @@
-package simpledb;
+package simpledb.test;
 
 import simpledb.common.Database;
 import simpledb.common.Type;
