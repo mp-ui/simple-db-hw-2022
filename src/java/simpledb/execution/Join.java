@@ -17,8 +17,9 @@ public class Join extends Operator {
     private static final long serialVersionUID = -1056607943416974883L;
 
     private final JoinPredicate predicate;
-    private OpIterator child1;
-    private OpIterator child2;
+    private final OpIterator child1;
+    private final OpIterator child2;
+    private final TupleDesc tupleDesc;
 
     /**
      * Constructor. Accepts two children to join and the predicate to join them on
@@ -31,6 +32,7 @@ public class Join extends Operator {
         this.predicate = p;
         this.child1 = child1;
         this.child2 = child2;
+        this.tupleDesc = TupleDesc.merge(child1.getTupleDesc(), child2.getTupleDesc());
     }
 
     public JoinPredicate getJoinPredicate() {
@@ -60,7 +62,7 @@ public class Join extends Operator {
      * implementation logic.
      */
     public TupleDesc getTupleDesc() {
-        return TupleDesc.merge(this.child1.getTupleDesc(), this.child2.getTupleDesc());
+        return this.tupleDesc;
     }
 
     public void open() throws DbException, NoSuchElementException, TransactionAbortedException {
@@ -151,12 +153,6 @@ public class Join extends Operator {
     @Override
     public OpIterator[] getChildren() {
         return new OpIterator[]{this.child1, this.child2};
-    }
-
-    @Override
-    public void setChildren(OpIterator[] children) {
-        this.child1 = children[0];
-        this.child2 = children[1];
     }
 
 }

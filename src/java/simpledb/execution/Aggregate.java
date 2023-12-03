@@ -22,7 +22,7 @@ public class Aggregate extends Operator {
     @Serial
     private static final long serialVersionUID = -9135544931049615936L;
 
-    private OpIterator child;
+    private final OpIterator child;
     private OpIterator aggregatorIterator;
 
     private final int aggregateField;
@@ -167,12 +167,6 @@ public class Aggregate extends Operator {
     @Override
     public OpIterator[] getChildren() {
         return new OpIterator[]{this.child};
-    }
-
-    @Override
-    public void setChildren(OpIterator[] children) {
-        this.child = children[0];
-        this.initAggregatorIterator();
     }
 
 }

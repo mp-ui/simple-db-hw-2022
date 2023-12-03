@@ -5,6 +5,7 @@ import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
 import simpledb.transaction.TransactionAbortedException;
 
+import java.io.Serial;
 import java.util.NoSuchElementException;
 
 /**
@@ -13,8 +14,8 @@ import java.util.NoSuchElementException;
  * <code>open</code> and <code>readNext</code>.
  */
 public abstract class Operator implements OpIterator {
-
-    private static final long serialVersionUID = 1L;
+    @Serial
+    private static final long serialVersionUID = 2489135147818155456L;
 
     public boolean hasNext() throws DbException, TransactionAbortedException {
         if (!this.open)
@@ -73,16 +74,6 @@ public abstract class Operator implements OpIterator {
      *         should be consistent among multiple calls.
      */
     public abstract OpIterator[] getChildren();
-
-    /**
-     * Set the children(child) of this operator. If the operator has only one
-     * child, children[0] should be used. If the operator is a join, children[0]
-     * and children[1] should be used.
-     *
-     * @param children the DbIterators which are to be set as the children(child) of
-     *                 this operator
-     */
-    public abstract void setChildren(OpIterator[] children);
 
     /**
      * @return return the TupleDesc of the output tuples of this operator

@@ -6,15 +6,17 @@ import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
 import simpledb.transaction.TransactionAbortedException;
 
+import java.io.Serial;
 import java.util.*;
 
 /**
  * OrderBy is an operator that implements a relational ORDER BY.
  */
 public class OrderBy extends Operator {
+    @Serial
+    private static final long serialVersionUID = -2274074303101535525L;
 
-    private static final long serialVersionUID = 1L;
-    private OpIterator child;
+    private final OpIterator child;
     private final TupleDesc td;
     private final List<Tuple> childTups = new ArrayList<>();
     private final int orderByField;
@@ -90,11 +92,6 @@ public class OrderBy extends Operator {
     @Override
     public OpIterator[] getChildren() {
         return new OpIterator[]{this.child};
-    }
-
-    @Override
-    public void setChildren(OpIterator[] children) {
-        this.child = children[0];
     }
 
 }

@@ -17,7 +17,7 @@ public class Filter extends Operator {
     private static final long serialVersionUID = -394502039912740208L;
 
     private final Predicate predicate;
-    private OpIterator child;
+    private final OpIterator child;
 
     /**
      * Constructor accepts a predicate to apply and a child operator to read
@@ -77,11 +77,6 @@ public class Filter extends Operator {
     @Override
     public OpIterator[] getChildren() {
         return new OpIterator[]{this.child};
-    }
-
-    @Override
-    public void setChildren(OpIterator[] children) {
-        this.child = children[0];
     }
 
 }

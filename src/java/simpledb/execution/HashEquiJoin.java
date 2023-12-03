@@ -5,16 +5,19 @@ import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
 import simpledb.transaction.TransactionAbortedException;
 
+import java.io.Serial;
 import java.util.*;
 
 /**
  * The Join operator implements the relational join operation.
  */
 public class HashEquiJoin extends Operator {
+    @Serial
+    private static final long serialVersionUID = -2248012997759839315L;
 
-    private static final long serialVersionUID = 1L;
     private final JoinPredicate pred;
-    private OpIterator child1, child2;
+    private final OpIterator child1;
+    private final OpIterator child2;
     private final TupleDesc comboTD;
     transient private Tuple t1 = null;
     transient private Tuple t2 = null;
@@ -158,12 +161,6 @@ public class HashEquiJoin extends Operator {
     @Override
     public OpIterator[] getChildren() {
         return new OpIterator[]{this.child1, this.child2};
-    }
-
-    @Override
-    public void setChildren(OpIterator[] children) {
-        this.child1 = children[0];
-        this.child2 = children[1];
     }
 
 }

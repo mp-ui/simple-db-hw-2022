@@ -34,18 +34,15 @@ public abstract class AbstractAggregatorIterator extends Operator {
         // 初始化TupleDesc
         List<Type> types = new ArrayList<>();
         List<String> names = new ArrayList<>();
-
         // 分组查询
         if (aggregator.grouping()) {
             types.add(aggregator.getOriginalTupleDesc().getFieldType(aggregator.getGroupField()));
             names.add(aggregator.getOriginalTupleDesc().getFieldName(aggregator.getGroupField()));
         }
-
         // 聚合查询的字段
         types.add(aggregator.getAggregateOperation().getType());
         names.add(String.format("%s(%s)", aggregator.getAggregateOperation().toString(),
                 aggregator.getOriginalTupleDesc().getFieldName(aggregator.getAggregateField())));
-
         this.tupleDesc = new TupleDesc(types.toArray(new Type[0]), names.toArray(new String[0]));
     }
 
@@ -94,11 +91,6 @@ public abstract class AbstractAggregatorIterator extends Operator {
     @Override
     public OpIterator[] getChildren() {
         return new OpIterator[0];
-    }
-
-    @Override
-    public void setChildren(OpIterator[] children) {
-
     }
 
     @Override

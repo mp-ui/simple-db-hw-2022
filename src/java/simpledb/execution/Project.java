@@ -6,6 +6,7 @@ import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
 import simpledb.transaction.TransactionAbortedException;
 
+import java.io.Serial;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -13,9 +14,10 @@ import java.util.NoSuchElementException;
  * Project is an operator that implements a relational projection.
  */
 public class Project extends Operator {
+    @Serial
+    private static final long serialVersionUID = 7275480380189329348L;
 
-    private static final long serialVersionUID = 1L;
-    private OpIterator child;
+    private final OpIterator child;
     private final TupleDesc td;
     private final List<Integer> outFieldIds;
 
@@ -85,13 +87,6 @@ public class Project extends Operator {
     @Override
     public OpIterator[] getChildren() {
         return new OpIterator[]{this.child};
-    }
-
-    @Override
-    public void setChildren(OpIterator[] children) {
-        if (this.child != children[0]) {
-            this.child = children[0];
-        }
     }
 
 }

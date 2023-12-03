@@ -29,7 +29,7 @@ public class Insert extends Operator {
     private final TupleDesc tupleDesc;
     private final TransactionId transactionId;
     private final int tableId;
-    private OpIterator child;
+    private final OpIterator child;
     private boolean called;
 
     /**
@@ -115,10 +115,5 @@ public class Insert extends Operator {
     @Override
     public OpIterator[] getChildren() {
         return new OpIterator[]{child};
-    }
-
-    @Override
-    public void setChildren(OpIterator[] children) {
-        this.child = children[0];
     }
 }
