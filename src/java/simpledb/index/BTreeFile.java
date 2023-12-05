@@ -155,6 +155,7 @@ public class BTreeFile implements DbFile {
     /**
      * Returns the number of pages in this BTreeFile.
      */
+    @Override
     public int numPages() {
         // we only ever write full pages
         return (int) ((f.length() - BTreeRootPtrPage.getPageSize()) / BufferPool.getPageSize());

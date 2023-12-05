@@ -125,6 +125,7 @@ public class HeapFile implements DbFile {
     /**
      * Returns the number of pages in this HeapFile.
      */
+    @Override
     public int numPages() {
         long length = this.file.length();
         int pageSize = BufferPool.getPageSize();
