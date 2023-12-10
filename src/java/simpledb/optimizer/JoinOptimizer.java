@@ -68,7 +68,7 @@ public class JoinOptimizer {
 
         JoinPredicate p = new JoinPredicate(t1id, lj.p, t2id);
 
-        j = new Join(p,plan1,plan2);
+        j = new Join(p, plan1, plan2);
 
         return j;
 
@@ -83,19 +83,14 @@ public class JoinOptimizer {
      * well as the number of CPU opertions performed by your join. Assume that
      * the cost of a single predicate application is roughly 1.
      *
-     * @param j     A LogicalJoinNode representing the join operation being
-     *              performed.
+     * @param j     A LogicalJoinNode representing the join operation being performed.
      * @param card1 Estimated cardinality of the left-hand side of the query
      * @param card2 Estimated cardinality of the right-hand side of the query
-     * @param cost1 Estimated cost of one full scan of the table on the left-hand
-     *              side of the query
-     * @param cost2 Estimated cost of one full scan of the table on the right-hand
-     *              side of the query
-     * @return An estimate of the cost of this query, in terms of cost1 and
-     *         cost2
+     * @param cost1 Estimated cost of one full scan of the table on the left-hand side of the query
+     * @param cost2 Estimated cost of one full scan of the table on the right-hand side of the query
+     * @return An estimate of the cost of this query, in terms of cost1 and cost2
      */
-    public double estimateJoinCost(LogicalJoinNode j, int card1, int card2,
-                                   double cost1, double cost2) {
+    public double estimateJoinCost(LogicalJoinNode j, int card1, int card2, double cost1, double cost2) {
         if (j instanceof LogicalSubplanJoinNode) {
             // A LogicalSubplanJoinNode represents a subquery.
             // You do not need to implement proper support for these for Lab 3.
@@ -105,7 +100,7 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return -1.0;
+            return cost1 + card1 * cost2 + card1 * card2;
         }
     }
 
@@ -144,7 +139,21 @@ public class JoinOptimizer {
                                                    boolean t2pkey, Map<String, TableStats> stats,
                                                    Map<String, Integer> tableAliasToId) {
         int card = 1;
-        // TODO: some code goes here
+
+        if (Objects.equals(joinOp, Predicate.Op.EQUALS)) {
+            if (t1pkey && t2pkey) {
+                card = Math.max(card1, card2);
+            } else if (t1pkey) {
+                card = card2;
+            } else if (t2pkey) {
+                card = card1;
+            } else {
+                card = Math.max(card1, card2);
+            }
+        } else {
+            card = (int) (0.3 * card1 * card2);
+        }
+
         return card <= 0 ? 1 : card;
     }
 
@@ -189,8 +198,7 @@ public class JoinOptimizer {
      *                            name)
      * @param explain             Indicates whether your code should explain its query plan or
      *                            simply execute it
-     * @return A List<LogicalJoinNode> that stores joins in the left-deep
-     *         order in which they should be executed.
+     * @return A List<LogicalJoinNode> that stores joins in the left-deep order in which they should be executed.
      * @throws ParsingException when stats or filter selectivities is missing a table in the
      *                          join, or or when another internal error occurs
      */
@@ -224,8 +232,7 @@ public class JoinOptimizer {
      *                            from returned CostCard)
      * @param pc                  the PlanCache for this join; should have subplans for all
      *                            plans of size joinSet.size()-1
-     * @return A {@link CostCard} objects desribing the cost, cardinality,
-     *         optimal subplan
+     * @return A {@link CostCard} objects desribing the cost, cardinality, optimal subplan
      * @throws ParsingException when stats, filterSelectivities, or pc object is missing
      *                          tables involved in join
      */
@@ -348,8 +355,7 @@ public class JoinOptimizer {
     }
 
     /**
-     * Return true if the specified table is in the list of joins, false
-     * otherwise
+     * Return true if the specified table is in the list of joins, false otherwise
      */
     private boolean doesJoin(List<LogicalJoinNode> joinlist, String table) {
         for (LogicalJoinNode j : joinlist) {
@@ -361,8 +367,7 @@ public class JoinOptimizer {
     }
 
     /**
-     * Return true if field is a primary key of the specified table, false
-     * otherwise
+     * Return true if field is a primary key of the specified table, false otherwise
      *
      * @param tableAlias The alias of the table in the query
      * @param field      The pure name of the field
@@ -375,8 +380,7 @@ public class JoinOptimizer {
     }
 
     /**
-     * Return true if a primary key field is joined by one of the joins in
-     * joinlist
+     * Return true if a primary key field is joined by one of the joins in joinlist
      */
     private boolean hasPkey(List<LogicalJoinNode> joinlist) {
         for (LogicalJoinNode j : joinlist) {
