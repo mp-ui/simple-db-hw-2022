@@ -118,7 +118,7 @@ public class HeapFile implements DbFile {
                 randomAccessFile.write(page.getPageData());
             }
         } finally {
-            readWriteLock.writeLock().lock();
+            readWriteLock.writeLock().unlock();
         }
     }
 
