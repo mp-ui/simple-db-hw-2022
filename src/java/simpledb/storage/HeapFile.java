@@ -1,5 +1,7 @@
 package simpledb.storage;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import simpledb.common.Database;
 import simpledb.common.DbException;
 import simpledb.common.Permissions;
@@ -25,11 +27,13 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * @see HeapPage#HeapPage
  */
 public class HeapFile implements DbFile {
+    private static final Logger LOGGER = LoggerFactory.getLogger(HeapFile.class);
 
     private final File file;
     private final TupleDesc tupleDesc;
 
     private final ReentrantReadWriteLock readWriteLock;
+    private int numPage;
 
     /**
      * Constructs a heap file backed by the specified file.
@@ -41,6 +45,10 @@ public class HeapFile implements DbFile {
         this.file = f;
         this.tupleDesc = td;
         this.readWriteLock = new ReentrantReadWriteLock(true);
+        // 计算页面数量
+        long length = this.file.length();
+        int pageSize = BufferPool.getPageSize();
+        this.numPage=  (int) Math.ceil((double) length / pageSize);
     }
 
     /**
@@ -86,8 +94,10 @@ public class HeapFile implements DbFile {
 
             // 页编号超出总页数，则返回空白页面（新增页面的场景使用）
             if (pageNumber >= numPages) {
+                // 超出页面总大小新增空白页面时，需要更新页面的数量
+                this.numPage = Math.max(this.numPage, pageNumber + 1);
                 HeapPageId pageId = new HeapPageId(this.getId(), pageNumber);
-                byte[] data = HeapPage.createEmptyPageData() ;
+                byte[] data = HeapPage.createEmptyPageData();
                 return new HeapPage(pageId, data);
             }
 
@@ -127,21 +137,24 @@ public class HeapFile implements DbFile {
      */
     @Override
     public int numPages() {
-        long length = this.file.length();
-        int pageSize = BufferPool.getPageSize();
-        return (int) Math.ceil((double) length / pageSize);
+        return this.numPage;
     }
 
     // see DbFile.java for javadocs
     public List<Page> insertTuple(TransactionId tid, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
+        LOGGER.info("Prepare to insert tuple. tid={}", tid);
         // 从头到尾，找到第一个有空位的页面
         boolean inserted = false;
         HeapPage page = null;
         for (int i = 0; i <= this.numPages(); i++) {
             PageId pageId = new HeapPageId(this.getId(), i);
-            page = (HeapPage) Database.getBufferPool().getPage(tid, pageId, Permissions.READ_WRITE);
+            // 先按照READ_ONLY权限获取页面，确认该页面有空闲插槽时再以READ_WRITE权限申请页面
+            page = (HeapPage) Database.getBufferPool().getPage(tid, pageId, Permissions.READ_ONLY);
             if (page.getNumUnusedSlots() > 0) {
+                LOGGER.info("Found a page to insert tuple. tid={}, pid={}", tid, pageId);
+                // 升级成写锁
+                Database.getBufferPool().getPage(tid, pageId, Permissions.READ_WRITE);
                 page.insertTuple(t);
                 inserted = true;
                 break;

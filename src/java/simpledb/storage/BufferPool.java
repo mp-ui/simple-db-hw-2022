@@ -5,10 +5,12 @@ import org.slf4j.LoggerFactory;
 import simpledb.common.Database;
 import simpledb.common.DbException;
 import simpledb.common.Permissions;
+import simpledb.transaction.LockManager;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -59,6 +61,8 @@ public class BufferPool {
     private final LinkedHashMap<PageId, Page> youngMap = new LinkedHashMap<>();
     private final LinkedHashMap<PageId, Page> oldMap = new LinkedHashMap<>();
 
+    private final LockManager lockManager = new LockManager();
+
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
@@ -100,45 +104,48 @@ public class BufferPool {
      */
     public Page getPage(TransactionId tid, PageId pid, Permissions perm)
             throws TransactionAbortedException, DbException {
-        // 简单LRU算法实现
-        Date now = new Date();
-        DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
-        LOGGER.info("Prepare to get page from youngMap. tid={}, tableId={}, pageNo={}, perm={}",
-                tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
-        Page page = youngMap.get(pid);
-        if (Objects.isNull(page)) {
-            LOGGER.info("Page not found in young map, attempt to get it in old map. tid={}, tableId={}, pageNo={}, " +
-                    "perm={}", tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
-            page = oldMap.get(pid);
+        lockManager.acquire(tid, pid, perm);
+        try {
+            // 简单LRU算法实现
+            Date now = new Date();
+            DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
+            LOGGER.info("Prepare to get page from youngMap. tid={}, pageId={}, perm={}", tid, pid, perm);
+            Page page = youngMap.get(pid);
             if (Objects.isNull(page)) {
-                LOGGER.info("Page not found in old map, attempt to read it from disk. tid={}, tableId={}, " +
-                        "pageNo={}, perm={}", tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
-                page = dbFile.readPage(pid);
-                LOGGER.info("Read page from disk. tid={}, tableId={}, pageNo={}, perm={}",
-                        tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
-                // 存入BufferPool
-                this.addPage(page);
-            } else {
-                LOGGER.info("Got page from oldMap. tid={}, tableId={}, pageNo={}, perm={}",
-                        tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
-                this.removeFromMap(oldMap, pid);
-                Date lastUsedTime = lastUsedTimeMap.getOrDefault(pid, now);
-                if (now.getTime() - lastUsedTime.getTime() > DEFAULT_OLD_BLOCK_TIMES &&
-                        youngMap.size() < numYoungSize) {
-                    this.putIntoMap(youngMap, page, numYoungSize);
+                LOGGER.info("Page not found in young map, attempt to get it in old map. tid={}, pageId={}, perm={}",
+                        tid, pid, perm);
+                page = oldMap.get(pid);
+                if (Objects.isNull(page)) {
+                    LOGGER.info("Page not found in old map, attempt to read it from disk. tid={}, pageId={}, perm={}",
+                            tid, pid, perm);
+                    page = dbFile.readPage(pid);
+                    LOGGER.info("Read page from disk. tid={}, pageId={}, perm={}", tid, pid, perm);
+                    // 存入BufferPool
+                    this.addPage(page);
                 } else {
-                    this.putIntoMap(oldMap, page, numOldSize);
+                    LOGGER.info("Got page from oldMap. tid={}, pageId={}, perm={}", tid, pid, perm);
+                    this.removeFromMap(oldMap, pid);
+                    Date lastUsedTime = lastUsedTimeMap.getOrDefault(pid, now);
+                    if (now.getTime() - lastUsedTime.getTime() > DEFAULT_OLD_BLOCK_TIMES &&
+                            youngMap.size() < numYoungSize) {
+                        this.putIntoMap(youngMap, page, numYoungSize);
+                    } else {
+                        this.putIntoMap(oldMap, page, numOldSize);
+                    }
                 }
+            } else {
+                LOGGER.info("Got page from youngMap. tid={}, pageId={}, perm={}", tid, pid, perm);
+                this.removeFromMap(youngMap, pid);
+                this.putIntoMap(youngMap, page, numYoungSize);
             }
-        } else {
-            LOGGER.info("Got page from youngMap. tid={}, tableId={}, pageNo={}, perm={}",
-                    tid.getId(), pid.getTableId(), pid.getPageNumber(), perm);
-            this.removeFromMap(youngMap, pid);
-            this.putIntoMap(youngMap, page, numYoungSize);
+            // 更新最后使用时间
+            lastUsedTimeMap.put(pid, now);
+            return page;
+        } catch (Exception e) {
+            LOGGER.error("Release lock because of exception. tid={}, pageId={}, perm={}", tid, pid, perm);
+            lockManager.release(tid, pid);
+            throw e;
         }
-        // 更新最后使用时间
-        lastUsedTimeMap.put(pid, now);
-        return page;
     }
 
     /**
@@ -193,13 +200,26 @@ public class BufferPool {
      * 当BufferPool满时，用于驱逐一个页面
      */
     private synchronized void evictPage() throws DbException {
-        if (!oldMap.isEmpty()) {
-            PageId pageId = oldMap.keySet().stream().findFirst().get();
-            this.removePage(pageId);
-        } else if (!youngMap.isEmpty()) {
-            PageId pageId = youngMap.keySet().stream().findFirst().get();
-            this.removePage(pageId);
+        LOGGER.info("Prepare to evict a page from BufferPool.");
+        List<Map.Entry<PageId, Page>> entries = new ArrayList<>();
+        entries.addAll(oldMap.entrySet());
+        entries.addAll(youngMap.entrySet());
+        // 找到最久未使用的一个脏页面
+        for (Map.Entry<PageId, Page> entry : entries) {
+            PageId pageId = entry.getKey();
+            Page page = entry.getValue();
+            if (Objects.isNull(page.isDirty())) {
+                LOGGER.info("Evict page {} from BufferPool.", pageId);
+                // 如果该页面被其他事务持有锁，则不能将其刷到磁盘，因为事务有可能会将其修改，修改过的页面必须要事务提交后才能刷新到磁盘
+                if (!lockManager.holdsLock(pageId)) {
+                    this.flushPage(pageId);
+                }
+                this.removePage(pageId);
+                return;
+            }
         }
+        // 如果仍然找不到则抛出异常
+        throw new DbException("All pages are dirty, can not evict any page in BufferPool.");
     }
 
     /**
@@ -212,8 +232,8 @@ public class BufferPool {
      * @param pid the ID of the page to unlock
      */
     public void unsafeReleasePage(TransactionId tid, PageId pid) {
-        // TODO: some code goes here
-        // not necessary for lab1|lab2
+        LOGGER.info("Unsafe release page. tid={}, pid={}", tid, pid);
+        lockManager.release(tid, pid);
     }
 
     /**
@@ -222,17 +242,7 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the unlock
      */
     public void transactionComplete(TransactionId tid) {
-        // TODO: some code goes here
-        // not necessary for lab1|lab2
-    }
-
-    /**
-     * Return true if the specified transaction has a lock on the specified page
-     */
-    public boolean holdsLock(TransactionId tid, PageId p) {
-        // TODO: some code goes here
-        // not necessary for lab1|lab2
-        return false;
+        this.transactionComplete(tid, true);
     }
 
     /**
@@ -243,8 +253,29 @@ public class BufferPool {
      * @param commit a flag indicating whether we should commit or abort
      */
     public void transactionComplete(TransactionId tid, boolean commit) {
-        // TODO: some code goes here
-        // not necessary for lab1|lab2
+        if (commit) {
+            LOGGER.info("commit transaction. tid={}", tid);
+        } else {
+            LOGGER.info("abort transaction. tid={}", tid);
+        }
+        List<Map.Entry<PageId, Page>> entries = new ArrayList<>();
+        entries.addAll(oldMap.entrySet());
+        entries.addAll(youngMap.entrySet());
+        for (Map.Entry<PageId, Page> entry : entries) {
+            PageId pageId = entry.getKey();
+            Page page = entry.getValue();
+            if (!lockManager.holdsLock(tid, pageId)) {
+                continue;
+            }
+            if (commit) {
+                // 如果提交事务，则将页面刷新到磁盘后解锁
+                flushPage(pageId);
+            } else if (Objects.equals(page.isDirty(), tid)) {
+                // 如果回滚事务，并且该页面是脏页（脏页一定是这个事务修改的，因为写锁只能被一个事务持有），则丢弃该页面
+                this.removePage(pageId);
+            }
+            lockManager.release(tid, pageId);
+        }
     }
 
     /**
@@ -319,13 +350,8 @@ public class BufferPool {
      * are removed from the cache so they can be reused safely
      */
     public synchronized void removePage(PageId pid) {
-        try {
-            this.flushPage(pid);
-            this.youngMap.remove(pid);
-            this.oldMap.remove(pid);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        this.youngMap.remove(pid);
+        this.oldMap.remove(pid);
     }
 
     /**
@@ -333,24 +359,22 @@ public class BufferPool {
      *
      * @param pid an ID indicating the page to flush
      */
-    private synchronized void flushPage(PageId pid) throws IOException {
+    private synchronized void flushPage(PageId pid) {
         Page page = oldMap.get(pid);
         if (Objects.isNull(page)) {
             youngMap.get(pid);
         }
-        if (Objects.nonNull(page)) {
+        if (Objects.nonNull(page) && Objects.nonNull(page.isDirty())) {
             DbFile dbFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
-            dbFile.writePage(page);
+            try {
+                LOGGER.info("Flush page {} to disk.", pid);
+                dbFile.writePage(page);
+            } catch (IOException e) {
+                LOGGER.error("An error occurred while flush a page to disk.", e);
+                throw new RuntimeException(e);
+            }
             page.markDirty(false, null);
         }
-    }
-
-    /**
-     * Write all pages of the specified transaction to disk.
-     */
-    public synchronized void flushPages(TransactionId tid) throws IOException {
-        // TODO: some code goes here
-        // not necessary for lab1|lab2
     }
 
 }

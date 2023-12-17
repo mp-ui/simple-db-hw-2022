@@ -95,12 +95,13 @@ public class BTreePageId implements PageId {
         return tableId == p.tableId && pgNo == p.pgNo && pgcateg == p.pgcateg;
     }
 
+    @Override
     public String toString() {
-
-        return "(tableId: " + tableId +
-                ", pgNo: " + pgNo +
-                ", pgcateg: " + categToString(pgcateg) +
-                ")";
+        return "BTreePageId{" +
+                "tableId=" + tableId +
+                ", pgNo=" + pgNo +
+                ", pgcateg=" + pgcateg +
+                '}';
     }
 
     /**
