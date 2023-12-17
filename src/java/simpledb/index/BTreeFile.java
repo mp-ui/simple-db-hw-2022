@@ -1,17 +1,38 @@
 package simpledb.index;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import simpledb.common.Database;
 import simpledb.common.DbException;
 import simpledb.common.Debug;
 import simpledb.common.Permissions;
 import simpledb.execution.IndexPredicate;
 import simpledb.execution.Predicate.Op;
-import simpledb.storage.*;
+import simpledb.storage.AbstractDbFileIterator;
+import simpledb.storage.BufferPool;
+import simpledb.storage.DbFile;
+import simpledb.storage.DbFileIterator;
+import simpledb.storage.Field;
+import simpledb.storage.Page;
+import simpledb.storage.PageId;
+import simpledb.storage.Tuple;
+import simpledb.storage.TupleDesc;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
-import java.io.*;
-import java.util.*;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
 
 /**
  * BTreeFile is an implementation of a DbFile that stores a B+ tree.
@@ -27,6 +48,7 @@ import java.util.*;
  * @see BTreeRootPtrPage#BTreeRootPtrPage
  */
 public class BTreeFile implements DbFile {
+    private static final Logger LOGGER = LoggerFactory.getLogger(BTreeFile.class);
 
     private final File f;
     private final TupleDesc td;
@@ -186,8 +208,30 @@ public class BTreeFile implements DbFile {
     private BTreeLeafPage findLeafPage(TransactionId tid, Map<PageId, Page> dirtypages, BTreePageId pid, Permissions perm,
                                        Field f)
             throws DbException, TransactionAbortedException {
-        // TODO: some code goes here
-        return null;
+        if (pid.pgcateg() == BTreePageId.ROOT_PTR) {
+            // 根指针页面，则读取出来，找到根页面
+            BTreeRootPtrPage page = (BTreeRootPtrPage) this.getPage(tid, dirtypages, pid, Permissions.READ_ONLY);
+            return findLeafPage(tid, dirtypages, page.getRootId(), perm, f);
+        } else if (pid.pgcateg() == BTreePageId.LEAF) {
+            // 叶子页面，直接返回
+            return (BTreeLeafPage) this.getPage(tid, dirtypages, pid, perm);
+        } else if (pid.pgcateg() == BTreePageId.HEADER) {
+            throw new DbException("parameter pid can not be a HEADER.");
+        }
+        // 内部页面，则扫描页面上的key值，找到一个合适的位置
+        BTreeInternalPage page = (BTreeInternalPage) this.getPage(tid, dirtypages, pid, Permissions.READ_ONLY);
+        Iterator<BTreeEntry> iterator = page.iterator();
+        BTreeEntry entry = null;
+        while (iterator.hasNext()) {
+            entry = iterator.next();
+            if (f == null || f.compare(Op.LESS_THAN_OR_EQ, entry.getKey())) {
+                return findLeafPage(tid, dirtypages, entry.getLeftChild(), perm, f);
+            }
+        }
+        if (entry == null) {
+            throw new DbException("no any entry in " + pid);
+        }
+        return findLeafPage(tid, dirtypages, entry.getRightChild(), perm, f);
     }
 
     /**
@@ -411,7 +455,7 @@ public class BTreeFile implements DbFile {
      * @param tid - the transaction id
      * @param t   - the tuple to insert
      * @return a list of all pages that were dirtied by this operation. Could include
-     *         many pages since parent pointers will need to be updated when an internal node splits.
+     * many pages since parent pointers will need to be updated when an internal node splits.
      * @see #splitLeafPage(TransactionId, Map, BTreeLeafPage, Field)
      */
     public List<Page> insertTuple(TransactionId tid, Tuple t)
@@ -768,7 +812,7 @@ public class BTreeFile implements DbFile {
      * @param tid - the transaction id
      * @param t   - the tuple to delete
      * @return a list of all pages that were dirtied by this operation. Could include
-     *         many pages since parent pointers will need to be updated when an internal node merges.
+     * many pages since parent pointers will need to be updated when an internal node merges.
      * @see #handleMinOccupancyPage(TransactionId, Map, BTreePage)
      */
     public List<Page> deleteTuple(TransactionId tid, Tuple t)
