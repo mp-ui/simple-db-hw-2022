@@ -252,7 +252,7 @@ public class BufferPool {
      * @param tid    the ID of the transaction requesting the unlock
      * @param commit a flag indicating whether we should commit or abort
      */
-    public void transactionComplete(TransactionId tid, boolean commit) {
+    public synchronized void transactionComplete(TransactionId tid, boolean commit) {
         if (commit) {
             LOGGER.info("commit transaction. tid={}", tid);
         } else {
