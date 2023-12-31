@@ -662,11 +662,40 @@ public class BTreeFile implements DbFile {
      */
     public void stealFromLeafPage(BTreeLeafPage page, BTreeLeafPage sibling,
                                   BTreeInternalPage parent, BTreeEntry entry, boolean isRightSibling) throws DbException {
-        // TODO: some code goes here
         //
         // Move some of the tuples from the sibling to the page so
         // that the tuples are evenly distributed. Be sure to update
         // the corresponding parent entry.
+        // 1、计算应该从其他页面中拿多少
+        int numTuples1 = page.getNumTuples();
+        int numTuples2 = sibling.getNumTuples();
+        if (numTuples1 >= numTuples2) {
+            // 如果当前页面比准备拿的页面的数量还多，则直接返回，无需拿
+            return;
+        }
+        int numToSteal = numTuples2 + (numTuples1 - numTuples2) / 2 - numTuples1;
+
+        // 2、从其他页面中拿numToSteal行数据
+        if (isRightSibling) {
+            Iterator<Tuple> iterator = sibling.iterator();
+            for (int i = 0; i < numToSteal; ++i) {
+                Tuple next = iterator.next();
+                sibling.deleteTuple(next);
+                page.insertTuple(next);
+            }
+            entry.setKey(iterator.next().getField(this.keyField));
+        } else {
+            Iterator<Tuple> iterator = sibling.reverseIterator();
+            for (int i = 0; i < numToSteal; ++i) {
+                Tuple next = iterator.next();
+                sibling.deleteTuple(next);
+                page.insertTuple(next);
+            }
+            entry.setKey(page.iterator().next().getField(this.keyField));
+        }
+
+        // 3、更新父页面的entry
+        parent.updateEntry(entry);
     }
 
     /**
@@ -736,11 +765,41 @@ public class BTreeFile implements DbFile {
     public void stealFromLeftInternalPage(TransactionId tid, Map<PageId, Page> dirtypages,
                                           BTreeInternalPage page, BTreeInternalPage leftSibling, BTreeInternalPage parent,
                                           BTreeEntry parentEntry) throws DbException, TransactionAbortedException {
-        // TODO: some code goes here
         // Move some of the entries from the left sibling to the page so
         // that the entries are evenly distributed. Be sure to update
         // the corresponding parent entry. Be sure to update the parent
         // pointers of all children in the entries that were moved.
+        // 1、计算需要从其他页面拿多少
+        int numEntries1 = page.getNumEntries();
+        int numEntries2 = leftSibling.getNumEntries();
+        if (numEntries1 >= numEntries2) {
+            return;
+        }
+        int numToSteal = numEntries2 + (numEntries1 - numEntries2) / 2 - numEntries1;
+
+        // 2、从左页面中拿数据
+        Iterator<BTreeEntry> iterator = leftSibling.reverseIterator();
+        BTreePageId rightPageLeftChild = page.iterator().next().getLeftChild();
+        for (int i = 0; i < numToSteal; ++i) {
+            BTreeEntry next = iterator.next();
+            leftSibling.deleteKeyAndRightChild(next);
+            // 左页面中移除的entry上升到父页面，父页面中的entry放到右页面
+            Field tmpKey = parentEntry.getKey();
+            parentEntry.setKey(next.getKey());
+            next.setKey(tmpKey);
+            // 左页面中移除的entry的右孩子，作为右页面新插入entry的左孩子
+            next.setLeftChild(next.getRightChild());
+            next.setRightChild(rightPageLeftChild);
+            page.insertEntry(next);
+            rightPageLeftChild = next.getLeftChild();
+        }
+
+        // 3、更新parentEntry
+        parent.updateEntry(parentEntry);
+
+        // 4、更新子页面的父指针
+        this.updateParentPointers(tid, dirtypages, page);
+        this.updateParentPointers(tid, dirtypages, leftSibling);
     }
 
     /**
@@ -762,11 +821,41 @@ public class BTreeFile implements DbFile {
     public void stealFromRightInternalPage(TransactionId tid, Map<PageId, Page> dirtypages,
                                            BTreeInternalPage page, BTreeInternalPage rightSibling, BTreeInternalPage parent,
                                            BTreeEntry parentEntry) throws DbException, TransactionAbortedException {
-        // TODO: some code goes here
         // Move some of the entries from the right sibling to the page so
         // that the entries are evenly distributed. Be sure to update
         // the corresponding parent entry. Be sure to update the parent
         // pointers of all children in the entries that were moved.
+        // 1、计算需要从其他页面拿多少
+        int numEntries1 = page.getNumEntries();
+        int numEntries2 = rightSibling.getNumEntries();
+        if (numEntries1 >= numEntries2) {
+            return;
+        }
+        int numToSteal = numEntries2 + (numEntries1 - numEntries2) / 2 - numEntries1;
+
+        // 2、从右页面中拿数据
+        BTreePageId leftPageRightChild = page.reverseIterator().next().getRightChild();
+        Iterator<BTreeEntry> iterator = rightSibling.iterator();
+        for (int i = 0; i < numToSteal; ++i) {
+            BTreeEntry next = iterator.next();
+            rightSibling.deleteKeyAndLeftChild(next);
+            // 右页面中移除的entry上升到父页面，父页面中的entry放到左页面
+            Field tmpKey = parentEntry.getKey();
+            parentEntry.setKey(next.getKey());
+            next.setKey(tmpKey);
+            // 右页面中移除的entry的左孩子，作为左边页面插入entry的右孩子
+            next.setRightChild(next.getLeftChild());
+            next.setLeftChild(leftPageRightChild);
+            page.insertEntry(next);
+            leftPageRightChild = next.getRightChild();
+        }
+
+        // 3、更新parentEntry
+        parent.updateEntry(parentEntry);
+
+        // 4、更新子页面的父指针
+        this.updateParentPointers(tid, dirtypages, page);
+        this.updateParentPointers(tid, dirtypages, rightSibling);
     }
 
     /**
@@ -789,13 +878,37 @@ public class BTreeFile implements DbFile {
     public void mergeLeafPages(TransactionId tid, Map<PageId, Page> dirtypages,
                                BTreeLeafPage leftPage, BTreeLeafPage rightPage, BTreeInternalPage parent, BTreeEntry parentEntry)
             throws DbException, IOException, TransactionAbortedException {
-
-        // TODO: some code goes here
         //
         // Move all the tuples from the right page to the left page, update
         // the sibling pointers, and make the right page available for reuse.
         // Delete the entry in the parent corresponding to the two pages that are merging -
         // deleteParentEntry() will be useful here
+        // 1、判断是否符合合并条件
+        if (leftPage.getNumTuples() + rightPage.getNumTuples() > leftPage.getMaxTuples()) {
+            return;
+        }
+
+        // 2、移动右边页面的数据到左边的页面
+        Iterator<Tuple> iterator = rightPage.iterator();
+        while (iterator.hasNext()) {
+            Tuple next = iterator.next();
+            rightPage.deleteTuple(next);
+            leftPage.insertTuple(next);
+        }
+
+        // 3、双向链表移除右页面
+        BTreePageId rightSiblingId = rightPage.getRightSiblingId();
+        if (rightSiblingId != null) {
+            ((BTreeLeafPage) this.getPage(tid, dirtypages, rightSiblingId, Permissions.READ_WRITE))
+                    .setLeftSiblingId(leftPage.getId());
+        }
+        leftPage.setRightSiblingId(rightSiblingId);
+
+        // 4、删除右页面
+        this.setEmptyPage(tid, dirtypages, rightPage.getId().getPageNumber());
+
+        // 5、删除父页面的entry
+        this.deleteParentEntry(tid, dirtypages, leftPage, parent, parentEntry);
     }
 
     /**
@@ -820,14 +933,39 @@ public class BTreeFile implements DbFile {
     public void mergeInternalPages(TransactionId tid, Map<PageId, Page> dirtypages,
                                    BTreeInternalPage leftPage, BTreeInternalPage rightPage, BTreeInternalPage parent, BTreeEntry parentEntry)
             throws DbException, IOException, TransactionAbortedException {
-
-        // TODO: some code goes here
         //
         // Move all the entries from the right page to the left page, update
         // the parent pointers of the children in the entries that were moved,
         // and make the right page available for reuse
         // Delete the entry in the parent corresponding to the two pages that are merging -
         // deleteParentEntry() will be useful here
+        // 1、判断是否符合合并条件
+        if (leftPage.getNumEntries() + rightPage.getNumEntries() + 1 > leftPage.getMaxEntries()) {
+            return;
+        }
+
+        // 2、将父页面的key添加到左边
+        BTreeEntry entry = new BTreeEntry(parentEntry.getKey(), leftPage.reverseIterator().next().getRightChild(),
+                rightPage.iterator().next().getLeftChild());
+        leftPage.insertEntry(entry);
+
+        // 3、移动右边页面的entry到左边
+        Iterator<BTreeEntry> iterator = rightPage.iterator();
+        while (iterator.hasNext()) {
+            BTreeEntry next = iterator.next();
+            rightPage.deleteKeyAndLeftChild(next);
+            leftPage.insertEntry(next);
+        }
+
+        // 4、删除父页面的entry
+        this.deleteParentEntry(tid, dirtypages, leftPage, parent, parentEntry);
+
+        // 5、删除右页面
+        this.setEmptyPage(tid, dirtypages, rightPage.getId().getPageNumber());
+
+        // 6、更新子页面的父指针
+        this.updateParentPointers(tid, dirtypages, leftPage);
+        this.updateParentPointers(tid, dirtypages, rightPage);
     }
 
     /**
