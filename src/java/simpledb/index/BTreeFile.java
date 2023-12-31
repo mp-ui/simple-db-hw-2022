@@ -272,16 +272,54 @@ public class BTreeFile implements DbFile {
      */
     public BTreeLeafPage splitLeafPage(TransactionId tid, Map<PageId, Page> dirtypages, BTreeLeafPage page, Field field)
             throws DbException, IOException, TransactionAbortedException {
-        // TODO: some code goes here
-        //
         // Split the leaf page by adding a new page on the right of the existing
         // page and moving half of the tuples to the new page.  Copy the middle key up
         // into the parent page, and recursively split the parent as needed to accommodate
         // the new entry.  getParentWithEmtpySlots() will be useful here.  Don't forget to update
         // the sibling pointers of all the affected leaf pages.  Return the page into which a
         // tuple with the given key field should be inserted.
-        return null;
 
+        // 1、申请一个空白页面
+        BTreeLeafPage newPage = (BTreeLeafPage) getEmptyPage(tid, dirtypages, BTreePageId.LEAF);
+
+        // 2、将被分开的页面中间砍掉一半，右边部分全部移动到新的页面中
+        int numTuples = page.getNumTuples();
+        Iterator<Tuple> iterator = page.reverseIterator();
+        for (int i = 0; i < numTuples / 2; ++i) {
+            Tuple next = iterator.next();
+            page.deleteTuple(next);
+            newPage.insertTuple(next);
+        }
+
+        // 3、将新建的页面插入到双向链表中，放到当前页面的右侧
+        BTreePageId rightSiblingId = page.getRightSiblingId();
+        if (rightSiblingId != null) {
+            BTreeLeafPage rightPage = (BTreeLeafPage) this.getPage(tid, dirtypages, rightSiblingId,
+                    Permissions.READ_WRITE);
+            rightPage.setLeftSiblingId(newPage.getId());
+        }
+        newPage.setRightSiblingId(rightSiblingId);
+        newPage.setLeftSiblingId(page.getId());
+        page.setRightSiblingId(newPage.getId());
+
+        // 4、将新页面加进父页面的entry中
+        // 4-1 找到父页面
+        BTreePageId parentId = page.getParentId();
+        // 4-2 判断父页面是否已经满，如果已经满则进行页分裂
+        Tuple tuple = newPage.getTuple(0);
+        Field primaryKeyField = tuple.getField(this.keyField);
+        BTreeInternalPage parent = this.getParentWithEmptySlots(tid, dirtypages, parentId, primaryKeyField);
+        // 4-3 生成父页面的entry，并插入父页面中，更新分裂后的两个页面的父指针
+        BTreeEntry entry = new BTreeEntry(primaryKeyField, page.getId(), newPage.getId());
+        parent.insertEntry(entry);
+        page.setParentId(parent.getId());
+        newPage.setParentId(parent.getId());
+
+        // 5、判断给定的待插入的Field应该在哪一个页面
+        if (field.compare(Op.LESS_THAN_OR_EQ, primaryKeyField)) {
+            return page;
+        }
+        return newPage;
     }
 
     /**
@@ -308,7 +346,6 @@ public class BTreeFile implements DbFile {
     public BTreeInternalPage splitInternalPage(TransactionId tid, Map<PageId, Page> dirtypages,
                                                BTreeInternalPage page, Field field)
             throws DbException, IOException, TransactionAbortedException {
-        // TODO: some code goes here
         //
         // Split the internal page by adding a new page on the right of the existing
         // page and moving half of the entries to the new page.  Push the middle key up
@@ -317,7 +354,41 @@ public class BTreeFile implements DbFile {
         // the parent pointers of all the children moving to the new page.  updateParentPointers()
         // will be useful here.  Return the page into which an entry with the given key field
         // should be inserted.
-        return null;
+        // 1、申请一个空白页面
+        BTreeInternalPage newPage = (BTreeInternalPage) getEmptyPage(tid, dirtypages, BTreePageId.INTERNAL);
+
+        // 2、将页面右边的一半，移动到新页面中
+        int numEntries = page.getNumEntries();
+        Iterator<BTreeEntry> iterator = page.reverseIterator();
+        for (int i = 0; i < numEntries / 2; ++i) {
+            BTreeEntry next = iterator.next();
+            page.deleteKeyAndRightChild(next);
+            newPage.insertEntry(next);
+        }
+
+        // 3、将中间的entry移动到父节点
+        // 3-1 获取中间的entry，并删除
+        BTreeEntry centerEntry = iterator.next();
+        page.deleteKeyAndRightChild(centerEntry);
+        // 3-2 获取适合插入该key的父页面
+        BTreePageId parentId = page.getParentId();
+        BTreeInternalPage parent = this.getParentWithEmptySlots(tid, dirtypages, parentId, centerEntry.getKey());
+        // 3-3 在父页面中插入，并更新分裂后的两个页面的父指针
+        centerEntry.setLeftChild(page.getId());
+        centerEntry.setRightChild(newPage.getId());
+        parent.insertEntry(centerEntry);
+        page.setParentId(parent.getId());
+        newPage.setParentId(parent.getId());
+
+        // 4、更新子页面的父指针（entry从一个页面迁移到另一个页面会造成子页面的父指针不正确）
+        this.updateParentPointers(tid, dirtypages, page);
+        this.updateParentPointers(tid, dirtypages, newPage);
+
+        // 5、计算参数中的field应该在哪一个页面
+        if (field.compare(Op.LESS_THAN_OR_EQ, centerEntry.getKey())) {
+            return page;
+        }
+        return newPage;
     }
 
     /**
@@ -401,7 +472,7 @@ public class BTreeFile implements DbFile {
      * @param page       - the parent page
      * @throws DbException
      * @throws TransactionAbortedException
-     * @see #updateParentPointer(TransactionId, HashMap, BTreePageId, BTreePageId)
+     * @see #updateParentPointer(TransactionId, Map, BTreePageId, BTreePageId)
      */
     private void updateParentPointers(TransactionId tid, Map<PageId, Page> dirtypages, BTreeInternalPage page)
             throws DbException, TransactionAbortedException {
