@@ -22,12 +22,12 @@ import java.util.stream.Collectors;
  */
 public class LockManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(LockManager.class);
-    private static final long LOCK_RETRY_INTERVAL_MIN = 100L;
-    private static final long LOCK_RETRY_INTERVAL_MAX = 200L;
+    private static final long LOCK_RETRY_INTERVAL_MIN = 200L;
+    private static final long LOCK_RETRY_INTERVAL_MAX = 500L;
     // 当重试次数超过这个数时，视为超时，抛出异常
-    private static final int DEADLOCK_SUSPECT__RETRY_TIME_THRESHOLD = 50;
+    private static final int DEADLOCK_SUSPECT__RETRY_TIME_THRESHOLD = 5;
     // 当重试次数达到这个数时，检测死锁
-    private static final int DEADLOCK_DETECT_RETRY_TIME_THRESHOLD = 5;
+    private static final int DEADLOCK_DETECT_RETRY_TIME_THRESHOLD = 1;
     private static final Random random = new Random();
 
     private final Map<PageId, Set<Lock>> lockMap = new ConcurrentHashMap<>();
