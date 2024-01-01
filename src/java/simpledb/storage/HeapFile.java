@@ -48,7 +48,7 @@ public class HeapFile implements DbFile {
         // 计算页面数量
         long length = this.file.length();
         int pageSize = BufferPool.getPageSize();
-        this.numPage=  (int) Math.ceil((double) length / pageSize);
+        this.numPage = (int) Math.ceil((double) length / pageSize);
     }
 
     /**

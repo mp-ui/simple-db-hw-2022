@@ -12,6 +12,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -120,9 +121,11 @@ public class LogFile {
         recoveryUndecided = true;
 
         // install shutdown hook to force cleanup on close
-        // Runtime.getRuntime().addShutdownHook(new Thread() {
-        // public void run() { shutdown(); }
-        // });
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            public void run() {
+                shutdown();
+            }
+        });
 
         //XXX WARNING -- there is nothing that verifies that the specified
         // log file actually corresponds to the current catalog.
@@ -290,7 +293,8 @@ public class LogFile {
             newPage = (Page) pageConsts[0].newInstance(pageArgs);
 
             //            Debug.log("READ PAGE OF TYPE " + pageClassName + ", table = " + newPage.getId().getTableId() + ", page = " + newPage.getId().pageno());
-        } catch (ClassNotFoundException | InvocationTargetException | IllegalAccessException | InstantiationException e) {
+        } catch (ClassNotFoundException | InvocationTargetException | IllegalAccessException |
+                 InstantiationException e) {
             e.printStackTrace();
             throw new IOException();
         }
@@ -515,8 +519,8 @@ public class LogFile {
             logCheckpoint();  //simple way to shutdown is to write a checkpoint record
             raf.close();
         } catch (IOException e) {
-            System.out.println("ERROR SHUTTING DOWN -- IGNORING.");
-            e.printStackTrace();
+            // System.out.println("ERROR SHUTTING DOWN -- IGNORING.");
+            // e.printStackTrace();
         }
     }
 
@@ -529,7 +533,93 @@ public class LogFile {
         synchronized (Database.getBufferPool()) {
             synchronized (this) {
                 recoveryUndecided = false;
-                // TODO: some code goes here
+                currentOffset = logFile.length();
+                // 1、找到checkpoint的位置
+                raf.seek(0);
+                long checkpoint = raf.readLong();
+                raf.readLong();
+
+                // 2、读取checkpoint的内容，取每个事务的BEGIN日志的位置，取最小值
+                long begin = currentOffset;
+                if (checkpoint != -1) {
+                    raf.seek(checkpoint);
+                    raf.readInt();
+                    raf.readLong();
+                    int numTransactionIds = raf.readInt();
+                    for (int i = 0; i < numTransactionIds; ++i) {
+                        raf.readLong();
+                        long firstLogRecord = raf.readLong();
+                        begin = Math.min(begin, firstLogRecord);
+                    }
+                } else {
+                    begin = 8;  // 文件开头的8个字节保存checkpoint的位置，日志从第9个字节开始保存
+                }
+
+                // 3、从当前位置往前读日志，保存每一条日志的下标，用于下面从头往后遍历
+                LinkedList<Long> logPositions = new LinkedList<>();
+                long pos = currentOffset;
+                while (pos > begin) {
+                    // 将文件指针调整到这一条日志的开始位置
+                    pos -= 8;
+                    raf.seek(pos);
+                    pos = raf.readLong();
+                    logPositions.addFirst(pos);
+                    raf.seek(pos);
+                }
+
+                // 4、从前往后读取日志内容，处理日志内容
+                Map<Long, Map<PageId, Page>> beforeImages = new HashMap<>();
+                Map<Long, Map<PageId, Page>> afterImages = new HashMap<>();
+                for (Long logPosition : logPositions) {
+                    raf.seek(logPosition);
+                    int logType = raf.readInt();
+                    long logTid = raf.readLong();
+                    if (logType == BEGIN_RECORD) {
+                        tidToFirstLogRecord.put(logTid, logPosition);
+                    } else if (logType == UPDATE_RECORD) {
+                        // before-image
+                        Page before = readPageData(raf);
+                        Map<PageId, Page> map = beforeImages.getOrDefault(logTid, new HashMap<>());
+                        map.putIfAbsent(before.getId(), before); // before-image应该取第一次UPDATE日志
+                        beforeImages.put(logTid, map);
+                        // after-image
+                        Page after = readPageData(raf);
+                        map = afterImages.getOrDefault(logTid, new HashMap<>());
+                        map.put(before.getId(), after);
+                        afterImages.put(logTid, map);
+                    } else if (logType == COMMIT_RECORD) {
+                        // 将该事务的所有after-image写入磁盘（redo）
+                        beforeImages.remove(logTid);
+                        Map<PageId, Page> afters = afterImages.remove(logTid);
+                        if (afters != null) {
+                            for (Page page : afters.values()) {
+                                Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                            }
+                        }
+                        tidToFirstLogRecord.remove(logTid);
+                    } else if (logType == ABORT_RECORD) {
+                        // 将该事务的所有after-image写入磁盘（undo）
+                        Map<PageId, Page> befores = beforeImages.remove(logTid);
+                        afterImages.remove(logTid);
+                        if (befores != null) {
+                            for (Page page : befores.values()) {
+                                Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                            }
+                        }
+                        tidToFirstLogRecord.remove(logTid);
+                    }
+                }
+
+                // 5、现存的事务全部回滚
+                for (Map<PageId, Page> befores : beforeImages.values()) {
+                    for (Page page : befores.values()) {
+                        Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                    }
+                }
+                tidToFirstLogRecord.clear();
+
+                // 6、重置文件指针
+                raf.seek(currentOffset);
             }
         }
     }
