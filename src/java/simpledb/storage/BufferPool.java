@@ -17,6 +17,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * BufferPool manages the reading and writing of pages into memory from
@@ -270,8 +272,8 @@ public class BufferPool {
             if (commit) {
                 // 如果提交事务，则将页面刷新到磁盘后解锁
                 flushPage(pageId);
-            } else if (Objects.equals(page.isDirty(), tid)) {
-                // 如果回滚事务，并且该页面是脏页（脏页一定是这个事务修改的，因为写锁只能被一个事务持有），则丢弃该页面
+            } else {
+                // 如果回滚事务，则丢弃该页面
                 this.removePage(pageId);
             }
             lockManager.release(tid, pageId);
@@ -350,6 +352,7 @@ public class BufferPool {
      * are removed from the cache so they can be reused safely
      */
     public synchronized void removePage(PageId pid) {
+        LOGGER.info("remove page from BufferPool. pid={}", pid);
         this.youngMap.remove(pid);
         this.oldMap.remove(pid);
     }
@@ -368,7 +371,14 @@ public class BufferPool {
             DbFile dbFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
             try {
                 LOGGER.info("Flush page {} to disk.", pid);
+                // 在页面写入磁盘之前，将页面的前后日志写入磁盘中（前：事务开始前的页面；后：当前的页面）
+                TransactionId dirtier = page.isDirty();
+                Database.getLogFile().logWrite(dirtier, page.getBeforeImage(), page);
+                Database.getLogFile().force();
+                // 将页面写入磁盘
                 dbFile.writePage(page);
+                // 重置before-image
+                page.setBeforeImage();
             } catch (IOException e) {
                 LOGGER.error("An error occurred while flush a page to disk.", e);
                 throw new RuntimeException(e);

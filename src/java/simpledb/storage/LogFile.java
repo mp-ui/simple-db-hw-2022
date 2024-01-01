@@ -10,7 +10,11 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
 
 /*
 LogFile implements the recovery subsystem of SimpleDb.  This class is
@@ -204,9 +208,7 @@ public class LogFile {
      * @param after  The after image of the page
      * @see Page#getBeforeImage
      */
-    public synchronized void logWrite(TransactionId tid, Page before,
-                                      Page after)
-            throws IOException {
+    public synchronized void logWrite(TransactionId tid, Page before, Page after) throws IOException {
         Debug.log("WRITE, offset = " + raf.getFilePointer());
         preAppend();
         /* update record conists of
@@ -468,12 +470,37 @@ public class LogFile {
      *
      * @param tid The transaction to rollback
      */
-    public void rollback(TransactionId tid)
-            throws NoSuchElementException, IOException {
+    public void rollback(TransactionId tid) throws NoSuchElementException, IOException {
         synchronized (Database.getBufferPool()) {
             synchronized (this) {
                 preAppend();
-                // TODO: some code goes here
+                // 1、找到事务tid在日志中的开始位置
+                Long beginPosition = tidToFirstLogRecord.get(tid.getId());
+                if (beginPosition == null) {
+                    throw new NoSuchElementException("TransactionId " + tid + " not exists or had been committed.");
+                }
+
+                // 2、从当前位置往前读，一直到begin位置，查找所有当前tid的WRITE日志，取before-image刷入磁盘
+                long pos = currentOffset;
+                while (pos > beginPosition) {
+                    // 往前读long类型，获取这一条日志的开始位置
+                    pos -= 8;
+                    raf.seek(pos);
+                    pos = raf.readLong();
+                    raf.seek(pos);
+                    // 读取日志的类型和tid，并且判断tid是否相等并且类型是否是UPDATE
+                    int logType = raf.readInt();
+                    long logTid = raf.readLong();
+                    if (tid.getId() == logTid && logType == UPDATE_RECORD) {
+                        Page beforePage = readPageData(raf);
+                        // 将before-image刷入磁盘，达到回滚的效果
+                        DbFile dbFile = Database.getCatalog().getDatabaseFile(beforePage.getId().getTableId());
+                        dbFile.writePage(beforePage);
+                    }
+                }
+
+                // 3、重置指针位置到最后
+                raf.seek(currentOffset);
             }
         }
     }
