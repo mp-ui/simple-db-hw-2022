@@ -33,7 +33,6 @@ public class HeapFile implements DbFile {
     private final TupleDesc tupleDesc;
 
     private final ReentrantReadWriteLock readWriteLock;
-    private int numPage;
 
     /**
      * Constructs a heap file backed by the specified file.
@@ -45,10 +44,6 @@ public class HeapFile implements DbFile {
         this.file = f;
         this.tupleDesc = td;
         this.readWriteLock = new ReentrantReadWriteLock(true);
-        // 计算页面数量
-        long length = this.file.length();
-        int pageSize = BufferPool.getPageSize();
-        this.numPage = (int) Math.ceil((double) length / pageSize);
     }
 
     /**
@@ -92,17 +87,19 @@ public class HeapFile implements DbFile {
                 throw new IllegalArgumentException("the page does not exist in this file.");
             }
 
+            final int pageSize = BufferPool.getPageSize();
             // 页编号超出总页数，则返回空白页面（新增页面的场景使用）
             if (pageNumber >= numPages) {
-                // 超出页面总大小新增空白页面时，需要更新页面的数量
-                this.numPage = Math.max(this.numPage, pageNumber + 1);
                 HeapPageId pageId = new HeapPageId(this.getId(), pageNumber);
                 byte[] data = HeapPage.createEmptyPageData();
+                try (RandomAccessFile randomAccessFile = new RandomAccessFile(this.file, "rw")) {
+                    randomAccessFile.seek(((long) pageNumber) * pageSize);
+                    randomAccessFile.write(data);
+                }
                 return new HeapPage(pageId, data);
             }
 
             try (RandomAccessFile randomAccessFile = new RandomAccessFile(this.file, "r")) {
-                int pageSize = BufferPool.getPageSize();
                 byte[] bytes = new byte[pageSize];
                 randomAccessFile.seek(((long) pageNumber) * pageSize);
                 randomAccessFile.read(bytes);
@@ -137,7 +134,10 @@ public class HeapFile implements DbFile {
      */
     @Override
     public int numPages() {
-        return this.numPage;
+        // 计算页面数量
+        long length = this.file.length();
+        int pageSize = BufferPool.getPageSize();
+        return (int) Math.ceil((double) length / pageSize);
     }
 
     // see DbFile.java for javadocs

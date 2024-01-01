@@ -121,11 +121,11 @@ public class LogFile {
         recoveryUndecided = true;
 
         // install shutdown hook to force cleanup on close
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            public void run() {
-                shutdown();
-            }
-        });
+        // Runtime.getRuntime().addShutdownHook(new Thread() {
+        //     public void run() {
+        //         shutdown();
+        //     }
+        // });
 
         //XXX WARNING -- there is nothing that verifies that the specified
         // log file actually corresponds to the current catalog.
